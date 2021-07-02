@@ -340,7 +340,7 @@ class Near2FarFields(ObjectiveQuantity):
                     time_src.frequency,
                     self._frequencies,
                     scale,
-                    dt,
+                    self.sim.fields.dt,
                 )
                 (num_basis, num_pts) = src.nodes.shape
                 for basis_i in range(num_basis):
