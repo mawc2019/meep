@@ -17,7 +17,12 @@
 #ifndef MEEP_H
 #define MEEP_H
 
+#include <functional>
+#include <limits>
 #include <memory>
+#include <unordered_map>
+#include <vector>
+
 #include <stdio.h>
 #include <stddef.h>
 #include <math.h>
@@ -25,8 +30,6 @@
 #include "meep/vec.hpp"
 #include "meep/mympi.hpp"
 #include "meep/meep-config.h"
-
-#include <vector>
 
 namespace meep {
 
@@ -711,6 +714,79 @@ boundary_region pml(double thickness, double Rasymptotic = 1e-15, double mean_st
 
 class binary_partition;
 
+enum in_or_out { Incoming = 0, Outgoing };
+const std::initializer_list<in_or_out> all_in_or_out{Incoming, Outgoing};
+
+enum connect_phase { CONNECT_PHASE = 0, CONNECT_NEGATE = 1, CONNECT_COPY = 2 };
+const std::initializer_list<connect_phase> all_connect_phases{
+     CONNECT_PHASE, CONNECT_NEGATE, CONNECT_COPY};
+constexpr int NUM_CONNECT_PHASE_TYPES = 3;
+
+// Communication pair(i, j) implies data being sent from i to j.
+using chunk_pair = std::pair<int, int>;
+
+// Key for the map that stored communication sizes.
+struct comms_key {
+  field_type ft;
+  connect_phase phase;
+  chunk_pair pair;
+};
+
+// Defined in fields.cpp
+bool operator==(const comms_key &lhs, const comms_key &rhs);
+
+class comms_key_hash_fn {
+
+public:
+  inline std::size_t operator()(const comms_key &key) const {
+    // Unroll hash combination to promote the generatiion of efficient code.
+    std::size_t ret = int_hasher(int(key.ft));
+    ret ^= int_hasher(int(key.phase)) + kHashAddConst + (ret << 6) + (ret >> 2);
+    ret ^= int_hasher(key.pair.first) + kHashAddConst + (ret << 6) + (ret >> 2);
+    ret ^= int_hasher(key.pair.second) + kHashAddConst + (ret << 6) + (ret >> 2);
+    return ret;
+  }
+
+private:
+  static constexpr size_t kHashAddConst = 0x9e3779b9;
+  std::hash<int> int_hasher;
+};
+
+// Represents a communication operation between chunks.
+struct comms_operation {
+  ptrdiff_t my_chunk_idx;
+  ptrdiff_t other_chunk_idx;
+  int other_proc_id;
+  int pair_idx;  // The numeric pair index used in many communications related arrays.
+  size_t transfer_size;
+  in_or_out comm_direction;
+  int tag;
+};
+
+struct comms_sequence {
+  std::vector<comms_operation> receive_ops;
+  std::vector<comms_operation> send_ops;
+
+  void clear() {
+    receive_ops.clear();
+    send_ops.clear();
+  }
+};
+
+// RAII based comms_manager that allows asynchronous send and receive functions to be initiated.
+// Upon destruction, the comms_manager waits for completion of all enqueued operations.
+class comms_manager {
+ public:
+  virtual ~comms_manager() {}
+  virtual void send_real_async(const void *buf, size_t count, int dest, int tag) = 0;
+  virtual void receive_real_async(void *buf, size_t count, int source, int tag) = 0;
+  virtual size_t max_transfer_size() const { return std::numeric_limits<size_t>::max(); };
+};
+
+// Factory function for `comms_manager`.
+std::unique_ptr<comms_manager> create_comms_manager();
+
+
 class structure {
 public:
   structure_chunk **chunks;
@@ -1031,6 +1107,8 @@ public:
                                              void *mode2_data, int ic_conjugate,
                                              bool retain_interp_weights, fields *parent);
 
+  int get_decimation_factor() const { return decimation_factor; };
+
   void operator-=(const dft_chunk &chunk);
 
   // the frequencies to loop_in_chunks
@@ -1039,7 +1117,7 @@ public:
   component c; // component to DFT (possibly transformed by symmetry)
 
   size_t N;                   // number of spatial points (on epsilon grid)
-  std::complex<double> *dft; // N x Nomega array of DFT values.
+  std::complex<realnum> *dft; // N x Nomega array of DFT values.
 
   class dft_chunk *next_in_chunk; // per-fields_chunk list of DFT chunks
   class dft_chunk *next_in_dft;   // next for this particular DFT vol./component
@@ -1090,11 +1168,14 @@ public:
   int sn;
 
   // cache of exp(iwt) * scale, of length Nomega
-  std::complex<double> *dft_phase;
+  std::complex<realnum> *dft_phase;
 
   ptrdiff_t avg1, avg2; // index offsets for average to get epsilon grid
 
   int vc; // component descriptor from the original volume
+
+ private:
+   int decimation_factor;
 };
 
 void save_dft_hdf5(dft_chunk *dft_chunks, component c, h5file *file, const char *dprefix = 0);
@@ -1109,7 +1190,7 @@ public:
            double fmax, int Nf, const volume &where_, direction normal_direction_,
            bool use_symmetry_);
   dft_flux(const component cE_, const component cH_, dft_chunk *E_, dft_chunk *H_,
-           const std::vector<double> freq_, const volume &where_, direction normal_direction_,
+           const std::vector<double> &freq_, const volume &where_, direction normal_direction_,
            bool use_symmetry_);
   dft_flux(const component cE_, const component cH_, dft_chunk *E_, dft_chunk *H_,
            const double *freq_, size_t Nfreq, const volume &where_, direction normal_direction_,
@@ -1147,7 +1228,7 @@ public:
   dft_energy(dft_chunk *E_, dft_chunk *H_, dft_chunk *D_, dft_chunk *B_, double freq_min,
              double freq_max, int Nf, const volume &where_);
   dft_energy(dft_chunk *E_, dft_chunk *H_, dft_chunk *D_, dft_chunk *B_,
-             const std::vector<double> freq_, const volume &where_);
+             const std::vector<double> &freq_, const volume &where_);
   dft_energy(dft_chunk *E_, dft_chunk *H_, dft_chunk *D_, dft_chunk *B_, const double *freq_,
              size_t Nfreq, const volume &where_);
   dft_energy(const dft_energy &f);
@@ -1184,7 +1265,7 @@ public:
   dft_force(dft_chunk *offdiag1_, dft_chunk *offdiag2_, dft_chunk *diag_, double fmin, double fmax,
             int Nf, const volume &where_);
   dft_force(dft_chunk *offdiag1_, dft_chunk *offdiag2_, dft_chunk *diag_,
-            const std::vector<double> freq_, const volume &where_);
+            const std::vector<double> &freq_, const volume &where_);
   dft_force(dft_chunk *offdiag1_, dft_chunk *offdiag2_, dft_chunk *diag_, const double *freq_,
             size_t Nfreq, const volume &where_);
   dft_force(const dft_force &f);
@@ -1225,7 +1306,7 @@ public:
   dft_near2far(dft_chunk *F, double fmin, double fmax, int Nf, double eps, double mu,
                const volume &where_, const direction periodic_d_[2], const int periodic_n_[2],
                const double periodic_k_[2], const double period_[2]);
-  dft_near2far(dft_chunk *F, const std::vector<double> freq_, double eps, double mu,
+  dft_near2far(dft_chunk *F, const std::vector<double> &freq_, double eps, double mu,
                const volume &where_, const direction periodic_d_[2], const int periodic_n_[2],
                const double periodic_k_[2], const double period_[2]);
   dft_near2far(dft_chunk *F, const double *freq_, size_t Nfreq, double eps, double mu,
@@ -1308,7 +1389,7 @@ private:
 class dft_fields {
 public:
   dft_fields(dft_chunk *chunks, double freq_min, double freq_max, int Nfreq, const volume &where);
-  dft_fields(dft_chunk *chunks, const std::vector<double> freq_, const volume &where);
+  dft_fields(dft_chunk *chunks, const std::vector<double> &freq_, const volume &where);
   dft_fields(dft_chunk *chunks, const double *freq_, size_t Nfreq, const volume &where);
 
   void scale_dfts(std::complex<double> scale);
@@ -1320,8 +1401,6 @@ public:
   volume where;
 };
 
-enum in_or_out { Incoming = 0, Outgoing };
-enum connect_phase { CONNECT_PHASE = 0, CONNECT_NEGATE = 1, CONNECT_COPY = 2 };
 
 // data for each susceptibility
 typedef struct polarization_state_s {
@@ -1359,8 +1438,8 @@ public:
 
   realnum **zeroes[NUM_FIELD_TYPES]; // Holds pointers to metal points.
   size_t num_zeroes[NUM_FIELD_TYPES];
-  realnum **connections[NUM_FIELD_TYPES][CONNECT_COPY + 1][Outgoing + 1];
-  size_t num_connections[NUM_FIELD_TYPES][CONNECT_COPY + 1][Outgoing + 1];
+  realnum **connections[NUM_FIELD_TYPES][NUM_CONNECT_PHASE_TYPES][Outgoing + 1];
+  size_t num_connections[NUM_FIELD_TYPES][NUM_CONNECT_PHASE_TYPES][Outgoing + 1];
   std::complex<realnum> *connection_phases[NUM_FIELD_TYPES];
 
   int npol[NUM_FIELD_TYPES];                // only E_stuff and H_stuff are used
@@ -1466,7 +1545,7 @@ private:
   // boundaries.cpp
   void alloc_extra_connections(field_type, connect_phase, in_or_out, size_t);
   // dft.cpp
-  void update_dfts(double timeE, double timeH);
+  void update_dfts(double timeE, double timeH, int current_step);
 
   void changing_structure();
 };
@@ -1482,7 +1561,39 @@ enum time_sink {
   FourierTransforming,
   MPBTime,
   GetFarfieldsTime,
-  Other
+  Other,
+  FieldUpdateB,
+  FieldUpdateH,
+  FieldUpdateD,
+  FieldUpdateE,
+  BoundarySteppingB,
+  BoundarySteppingWH,
+  BoundarySteppingPH,
+  BoundarySteppingH,
+  BoundarySteppingD,
+  BoundarySteppingWE,
+  BoundarySteppingPE,
+  BoundarySteppingE
+};
+using time_sink_to_duration_map = std::unordered_map<time_sink, double, std::hash<int>>;
+
+// RAII-based profiling timer that accumulates wall time from creation until it
+// is destroyed or the `exit` method is invoked. Not thread-safe.
+class timing_scope {
+public:
+  // Creates a `timing_scope` that persists timing information in `timers_` but does not take
+  // ownership of it.
+  explicit timing_scope(time_sink_to_duration_map *timers_, time_sink sink_ = Other);
+  ~timing_scope();
+  timing_scope &operator=(const timing_scope &other);
+  // Stops time accumulation for the timing_scope.
+  void exit();
+
+private:
+  time_sink_to_duration_map *timers;  // Not owned by us.
+  time_sink sink;
+  bool active;
+  double t_start;
 };
 
 typedef void (*field_chunkloop)(fields_chunk *fc, int ichunk, component cgrid, ivec is, ivec ie,
@@ -1570,19 +1681,6 @@ public:
   flux_vol *fluxes;
   symmetry S;
 
-  // The following is an array that is num_chunks by num_chunks.  Actually
-  // it is two arrays, one for the imaginary and one for the real part.
-  realnum **comm_blocks[NUM_FIELD_TYPES];
-  // This is the same size as each comm_blocks array, and store the sizes
-  // of the comm blocks themselves for each connection-phase type
-  size_t *comm_sizes[NUM_FIELD_TYPES][CONNECT_COPY + 1];
-  size_t comm_size_tot(int f, int pair) const {
-    size_t sum = 0;
-    for (int ip = 0; ip < 3; ++ip)
-      sum += comm_sizes[f][ip][pair];
-    return sum;
-  }
-
   double a, dt; // The resolution a and timestep dt=Courant/a
   grid_volume gv, user_volume;
   volume v;
@@ -1608,7 +1706,7 @@ public:
   void reset();
 
   // time.cpp
-  std::vector<double> time_spent_on(time_sink);
+  std::vector<double> time_spent_on(time_sink sink);
   double mean_time_spent_on(time_sink);
   void print_times();
   // boundaries.cpp
@@ -1726,8 +1824,9 @@ public:
   // cw_fields.cpp:
   bool solve_cw(double tol, int maxiters, std::complex<double> frequency, int L = 2,
                 std::complex<double> *eigfreq = NULL, double eigtol = 1e-8, int eigiters = 20);
-  bool solve_cw(double tol = 1e-8, int maxiters = 10000, int L = 2,
-                std::complex<double> *eigfreq = NULL, double eigtol = 1e-8, int eigiters = 20);
+  bool solve_cw(double tol = sizeof(realnum) == sizeof(float) ? 1e-5 : 1e-8, int maxiters = 10000,
+                int L = 2, std::complex<double> *eigfreq = NULL, double eigtol = 1e-8,
+                int eigiters = 20);
 
   // sources.cpp:
   double last_source_time();
@@ -1825,43 +1924,44 @@ public:
                      std::complex<double> stored_weight = 1.0, dft_chunk *chunk_next = 0,
                      bool sqrt_dV_and_interp_weights = false,
                      std::complex<double> extra_weight = 1.0, bool use_centered_grid = true,
-                     int vc = 0) {
+                     int vc = 0, int decimation_factor = 1) {
     return add_dft(c, where, linspace(freq_min, freq_max, Nfreq), include_dV_and_interp_weights,
                    stored_weight, chunk_next, sqrt_dV_and_interp_weights, extra_weight,
-                   use_centered_grid, vc);
+                   use_centered_grid, vc, decimation_factor);
   }
   dft_chunk *add_dft(component c, const volume &where, const double *freq, size_t Nfreq,
                      bool include_dV_and_interp_weights = true,
                      std::complex<double> stored_weight = 1.0, dft_chunk *chunk_next = 0,
                      bool sqrt_dV_and_interp_weights = false,
                      std::complex<double> extra_weight = 1.0, bool use_centered_grid = true,
-                     int vc = 0);
-  dft_chunk *add_dft(component c, const volume &where, const std::vector<double> freq,
+                     int vc = 0, int decimation_factor = 1);
+  dft_chunk *add_dft(component c, const volume &where, const std::vector<double>& freq,
                      bool include_dV_and_interp_weights = true,
                      std::complex<double> stored_weight = 1.0, dft_chunk *chunk_next = 0,
                      bool sqrt_dV_and_interp_weights = false,
                      std::complex<double> extra_weight = 1.0, bool use_centered_grid = true,
-                     int vc = 0) {
+                     int vc = 0, int decimation_factor = 1) {
     return add_dft(c, where, freq.data(), freq.size(), include_dV_and_interp_weights, stored_weight,
-                   chunk_next, sqrt_dV_and_interp_weights, extra_weight, use_centered_grid, vc);
+                   chunk_next, sqrt_dV_and_interp_weights, extra_weight, use_centered_grid, vc,
+                   decimation_factor);
   }
   dft_chunk *add_dft_pt(component c, const vec &where, double freq_min, double freq_max,
                         int Nfreq) {
     return add_dft(c, where, linspace(freq_min, freq_max, Nfreq), false);
   }
-  dft_chunk *add_dft_pt(component c, const vec &where, const std::vector<double> freq) {
+  dft_chunk *add_dft_pt(component c, const vec &where, const std::vector<double> &freq) {
     return add_dft(c, where, freq, false);
   }
   dft_chunk *add_dft(const volume_list *where, double freq_min, double freq_max, int Nfreq,
                      bool include_dV = true) {
     return add_dft(where, linspace(freq_min, freq_max, Nfreq), include_dV);
   }
-  dft_chunk *add_dft(const volume_list *where, const std::vector<double> freq,
+  dft_chunk *add_dft(const volume_list *where, const std::vector<double> &freq,
                      bool include_dV = true);
   void update_dfts();
   dft_flux add_dft_flux(const volume_list *where, const double *freq, size_t Nfreq,
                         bool use_symmetry = true, bool centered_grid = true);
-  dft_flux add_dft_flux(const volume_list *where, const std::vector<double> freq,
+  dft_flux add_dft_flux(const volume_list *where, const std::vector<double> &freq,
                         bool use_symmetry = true, bool centered_grid = true) {
     return add_dft_flux(where, freq.data(), freq.size(), use_symmetry, centered_grid);
   }
@@ -1873,40 +1973,42 @@ public:
                         int Nfreq, bool use_symmetry = true, bool centered_grid = true) {
     return add_dft_flux(d, where, linspace(freq_min, freq_max, Nfreq), use_symmetry, centered_grid);
   }
-  dft_flux add_dft_flux(direction d, const volume &where, const std::vector<double> freq,
+  dft_flux add_dft_flux(direction d, const volume &where, const std::vector<double> &freq,
                         bool use_symmetry = true, bool centered_grid = true) {
     return add_dft_flux(d, where, freq.data(), freq.size(), use_symmetry, centered_grid);
   }
   dft_flux add_dft_flux(direction d, const volume &where, const double *freq, size_t Nfreq,
                         bool use_symmetry = true, bool centered_grid = true);
   dft_flux add_dft_flux_box(const volume &where, double freq_min, double freq_max, int Nfreq);
-  dft_flux add_dft_flux_box(const volume &where, const std::vector<double> freq);
+  dft_flux add_dft_flux_box(const volume &where, const std::vector<double> &freq);
   dft_flux add_dft_flux_plane(const volume &where, double freq_min, double freq_max, int Nfreq);
-  dft_flux add_dft_flux_plane(const volume &where, const std::vector<double> freq);
+  dft_flux add_dft_flux_plane(const volume &where, const std::vector<double> &freq);
 
   // a "mode monitor" is just a dft_flux with symmetry reduction turned off.
   dft_flux add_mode_monitor(direction d, const volume &where, double freq_min, double freq_max,
                             int Nfreq, bool centered_grid = true) {
     return add_mode_monitor(d, where, linspace(freq_min, freq_max, Nfreq), centered_grid);
   }
-  dft_flux add_mode_monitor(direction d, const volume &where, const std::vector<double> freq, bool centered_grid = true) {
+  dft_flux add_mode_monitor(direction d, const volume &where, const std::vector<double> &freq, bool centered_grid = true) {
     return add_mode_monitor(d, where, freq.data(), freq.size(), centered_grid);
   }
   dft_flux add_mode_monitor(direction d, const volume &where, const double *freq, size_t Nfreq, bool centered_grid = true);
 
   dft_fields add_dft_fields(component *components, int num_components, const volume where,
                             double freq_min, double freq_max, int Nfreq,
-                            bool use_centered_grid = true) {
+                            bool use_centered_grid = true, int decimation_factor = 1) {
     return add_dft_fields(components, num_components, where, linspace(freq_min, freq_max, Nfreq),
-                          use_centered_grid);
+                          use_centered_grid, decimation_factor);
   }
   dft_fields add_dft_fields(component *components, int num_components, const volume where,
-                            const std::vector<double> freq, bool use_centered_grid = true) {
+                            const std::vector<double> &freq, bool use_centered_grid = true,
+                            int decimation_factor = 1) {
     return add_dft_fields(components, num_components, where, freq.data(), freq.size(),
-                          use_centered_grid);
+                          use_centered_grid, decimation_factor);
   }
   dft_fields add_dft_fields(component *components, int num_components, const volume where,
-                            const double *freq, size_t Nfreq, bool use_centered_grid = true);
+                            const double *freq, size_t Nfreq, bool use_centered_grid = true,
+                            int decimation_factor = 1);
 
   /********************************************************/
   /* process_dft_component is an intermediate-level       */
@@ -1954,7 +2056,7 @@ public:
   dft_energy add_dft_energy(const volume_list *where, double freq_min, double freq_max, int Nfreq) {
     return add_dft_energy(where, linspace(freq_min, freq_max, Nfreq));
   }
-  dft_energy add_dft_energy(const volume_list *where, const std::vector<double> freq) {
+  dft_energy add_dft_energy(const volume_list *where, const std::vector<double> &freq) {
     return add_dft_energy(where, freq.data(), freq.size());
   }
   dft_energy add_dft_energy(const volume_list *where, const double *freq, size_t Nfreq);
@@ -1963,7 +2065,7 @@ public:
   dft_force add_dft_force(const volume_list *where, double freq_min, double freq_max, int Nfreq) {
     return add_dft_force(where, linspace(freq_min, freq_max, Nfreq));
   }
-  dft_force add_dft_force(const volume_list *where, const std::vector<double> freq) {
+  dft_force add_dft_force(const volume_list *where, const std::vector<double> &freq) {
     return add_dft_force(where, freq.data(), freq.size());
   }
   dft_force add_dft_force(const volume_list *where, const double *freq, size_t Nfreq);
@@ -1973,7 +2075,7 @@ public:
                                 int Nfreq, int Nperiods = 1) {
     return add_dft_near2far(where, linspace(freq_min, freq_max, Nfreq), Nperiods);
   }
-  dft_near2far add_dft_near2far(const volume_list *where, const std::vector<double> freq,
+  dft_near2far add_dft_near2far(const volume_list *where, const std::vector<double> &freq,
                                 int Nperiods = 1) {
     return add_dft_near2far(where, freq.data(), freq.size(), Nperiods);
   }
@@ -2039,9 +2141,9 @@ public:
 private:
   int synchronized_magnetic_fields; // count number of nested synchs
   double last_wall_time;
-#define MEEP_TIMING_STACK_SZ 10
-  time_sink working_on, was_working_on[MEEP_TIMING_STACK_SZ];
-  double times_spent[Other + 1];
+  std::vector<time_sink> was_working_on;
+  time_sink_to_duration_map times_spent;
+  timing_scope working_on;
   // fields.cpp
   void figure_out_step_plan();
   // boundaries.cpp
@@ -2057,8 +2159,6 @@ private:
   bool locate_point_in_user_volume(ivec *, std::complex<double> *phase) const;
   void locate_volume_source_in_user_volume(const vec p1, const vec p2, vec newp1[8], vec newp2[8],
                                            std::complex<double> kphase[8], int &ncopies) const;
-  // mympi.cpp
-  void boundary_communications(field_type);
   // step.cpp
   void phase_material();
   void step_db(field_type ft);
@@ -2078,9 +2178,41 @@ public:
   // boundaries.cpp
   bool locate_component_point(component *, ivec *, std::complex<double> *) const;
   // time.cpp
-  void am_now_working_on(time_sink);
+  void am_now_working_on(time_sink sink);
   void finished_working();
+
+  double get_time_spent_on(time_sink sink) const;
+  // Returns a map from time_sink to the vector of total times each MPI process spent on the
+  // indicated category.
+  std::unordered_map<time_sink, std::vector<double>, std::hash<int> > get_timing_data() const;
+
+private:
   void reset_timers();
+  timing_scope with_timing_scope(time_sink sink);
+
+  // The following is an array that is num_chunks by num_chunks.  Actually
+  // it is two arrays, one for the imaginary and one for the real part.
+  realnum **comm_blocks[NUM_FIELD_TYPES];
+  // Map with all non-zero communication block sizes.
+  std::unordered_map<comms_key, size_t, comms_key_hash_fn> comm_sizes;
+  // The sequence of send and receive operations for each field type.
+  comms_sequence comms_sequence_for_field[NUM_FIELD_TYPES];
+
+  size_t get_comm_size(const comms_key& key) const {
+    auto it = comm_sizes.find(key);
+    return (it != comm_sizes.end()) ? it->second : 0;
+  }
+
+  size_t comm_size_tot(field_type ft, const chunk_pair& pair) const {
+    size_t sum = 0;
+    for (auto ip : all_connect_phases)
+      sum += get_comm_size({ft, ip, pair});
+    return sum;
+  }
+
+  int chunk_pair_to_index(const chunk_pair& pair) const {
+    return pair.first + num_chunks * pair.second;
+  }
 };
 
 class flux_vol {
@@ -2200,6 +2332,9 @@ private:
   std::unique_ptr<binary_partition> left;
   std::unique_ptr<binary_partition> right;
 };
+
+// control whether CPU flushes subnormal values; see mympi.cpp
+void set_zero_subnormals(bool iszero);
 
 } /* namespace meep */
 

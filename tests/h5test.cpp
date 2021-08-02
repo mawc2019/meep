@@ -11,6 +11,8 @@
 #include "config.h"
 using namespace meep;
 using std::complex;
+using std::max;
+using std::min;
 
 const double xsize = 2.0;
 const double ysize = 2.0;
@@ -46,7 +48,7 @@ symmetry make_rotate4z(const grid_volume &gv) { return rotate4(Z, gv); }
 
 typedef symmetry (*symfunc)(const grid_volume &);
 
-const double tol = sizeof(realnum) == sizeof(float) ? 1e-4 : 1e-8;
+const double tol = sizeof(realnum) == sizeof(float) ? 2e-4 : 1e-8;
 double compare(double a, double b, const char *nam, size_t i0, size_t i1, size_t i2) {
   if (fabs(a - b) > tol * tol + fabs(b) * tol || b != b) {
     master_printf("%g vs. %g differs by\t%g\n", a, b, fabs(a - b));
@@ -157,9 +159,9 @@ bool check_2d(double eps(const vec &), double a, int splitting, symfunc Sf, doub
 
         double err =
             compare(h5data[idx], get_reim(f.get_field(cs, loc) * ph, reim), name, i0, i1, 0);
-        err_max = max(err, err_max);
-        data_min = min(data_min, h5data[idx]);
-        data_max = max(data_max, h5data[idx]);
+        err_max = max<double>(err, err_max);
+        data_min = min<double>(data_min, h5data[idx]);
+        data_max = max<double>(data_max, h5data[idx]);
       }
     }
     delete[] h5data;
@@ -269,8 +271,8 @@ bool check_3d(double eps(const vec &), double a, int splitting, symfunc Sf, comp
           double err =
               compare(h5data[idx], get_reim(f.get_field(cs, loc) * ph, reim), name, i0, i1, i2);
           err_max = max(err, err_max);
-          data_min = min(data_min, h5data[idx]);
-          data_max = max(data_max, h5data[idx]);
+          data_min = min<double>(data_min, h5data[idx]);
+          data_max = max<double>(data_max, h5data[idx]);
         }
       }
     }
@@ -348,8 +350,8 @@ bool check_2d_monitor(double eps(const vec &), double a, int splitting, symfunc 
     for (int i = 0; i < f.t; ++i) {
       double err = compare(h5data[i], get_reim(mon[i], reim), name, i, 0, 0);
       err_max = max(err, err_max);
-      data_min = min(data_min, h5data[i]);
-      data_max = max(data_max, h5data[i]);
+      data_min = min<double>(data_min, h5data[i]);
+      data_max = max<double>(data_max, h5data[i]);
     }
     delete[] h5data;
   }

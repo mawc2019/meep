@@ -40,6 +40,7 @@ except ImportError:
 
 verbosity = Verbosity(mp.cvar, 'meep', 1)
 
+mp.set_zero_subnormals(True)
 
 # Send output from Meep, ctlgeom, and MPB to Python's stdout
 mp.set_meep_printf_callback(mp.py_master_printf_wrap)
@@ -1210,6 +1211,7 @@ class Simulation(object):
         self.default_material = default_material
         self.epsilon_input_file = epsilon_input_file
         self.num_chunks = chunk_layout.numchunks() if isinstance(chunk_layout,mp.BinaryPartition) else num_chunks
+        self._num_chunks_original = self.num_chunks
         self.Courant = Courant
         self.global_d_conductivity = 0
         self.global_b_conductivity = 0
@@ -1238,6 +1240,7 @@ class Simulation(object):
         self.force_all_components = force_all_components
         self.split_chunks_evenly = split_chunks_evenly
         self.chunk_layout = chunk_layout
+        self._chunk_layout_original = self.chunk_layout
         self.collect_stats = collect_stats
         self.fragment_stats = None
         self._output_stats = os.environ.get('MEEP_STATS', None)
@@ -1706,6 +1709,12 @@ class Simulation(object):
             self.load_chunk_layout(br, self.chunk_layout)
             self.set_materials()
 
+        # Update sim.chunk_layout if it is generated internally from Meep
+        if self.chunk_layout is None:
+            self.chunk_layout = self.structure.get_binary_partition()
+            # We need self.num_chunks to be consistent
+            self.num_chunks = self.chunk_layout.numchunks()
+
         if self.load_structure_file:
             self.load_structure(self.load_structure_file)
 
@@ -1919,15 +1928,7 @@ class Simulation(object):
             self.fields.require_component(mp.Ez)
             self.fields.require_component(mp.Hz)
 
-        def use_real(self):
-            cond1 = self.is_cylindrical and self.m != 0
-            cond2 = any([s.phase.imag for s in self.symmetries])
-            cond3 = not self.k_point
-            cond4 = self.special_kz and self.k_point.x == 0 and self.k_point.y == 0
-            cond5 = not (cond3 or cond4 or self.k_point == Vector3())
-            return not (self.force_complex_fields or cond1 or cond2 or cond5)
-
-        if use_real(self):
+        if self.using_real_fields():
             self.fields.use_real_fields()
         elif verbosity.meep > 0:
             print("Meep: using complex fields.")
@@ -1942,6 +1943,14 @@ class Simulation(object):
             hook()
 
         self._is_initialized = True
+        
+    def using_real_fields(self):
+        cond1 = self.is_cylindrical and self.m != 0
+        cond2 = any([s.phase.imag for s in self.symmetries])
+        cond3 = not self.k_point
+        cond4 = self.special_kz and self.k_point.x == 0 and self.k_point.y == 0
+        cond5 = not (cond3 or cond4 or self.k_point == Vector3())
+        return not (self.force_complex_fields or cond1 or cond2 or cond5)
 
     def initialize_field(self, cmpnt, amp_func):
         """
@@ -2402,7 +2411,7 @@ class Simulation(object):
 
     def add_dft_fields(self, *args, **kwargs):
         """
-        `add_dft_fields(cs, fcen, df, nfreq, freq, where=None, center=None, size=None, yee_grid=False)` ##sig
+        `add_dft_fields(cs, fcen, df, nfreq, freq, where=None, center=None, size=None, yee_grid=False, decimation_factor=1)` ##sig
 
         Given a list of field components `cs`, compute the Fourier transform of these
         fields for `nfreq` equally spaced frequencies covering the frequency range
@@ -2412,7 +2421,13 @@ class Simulation(object):
         default routine interpolates the Fourier transformed fields at the center of each
         voxel within the specified volume. Alternatively, the exact Fourier transformed
         fields evaluated at each corresponding Yee grid point is available by setting
-        `yee_grid` to `True`.
+        `yee_grid` to `True`. To reduce the memory bandwidth burden of
+        accumulating DFT fields, an integer `decimation_factor` >= 1 can be
+        specified. DFT field values are updated every `decimation_factor`
+        timesteps. Use this experimental feature with care, as the decimated
+        timeseries may be corruped by aliasing of high frequencies. The choice
+        of decimation factor should take the properties of all sources in the
+        simulation and the frequency range of the DFT field monitor into account.
         """
         components = args[0]
         args = fix_dft_args(args, 1)
@@ -2421,21 +2436,27 @@ class Simulation(object):
         center = kwargs.get('center', None)
         size = kwargs.get('size', None)
         yee_grid = kwargs.get('yee_grid', False)
+        decimation_factor = kwargs.get('decimation_factor', 1)
         center_v3 = Vector3(*center) if center is not None else None
         size_v3 = Vector3(*size) if size is not None else None
         use_centered_grid = not yee_grid
-        dftf = DftFields(self._add_dft_fields, [components, where, center_v3, size_v3, freq, use_centered_grid])
+        dftf = DftFields(self._add_dft_fields, [
+            components, where, center_v3, size_v3, freq, use_centered_grid,
+            decimation_factor
+        ])
         self.dft_objects.append(dftf)
         return dftf
 
-    def _add_dft_fields(self, components, where, center, size, freq, use_centered_grid):
+    def _add_dft_fields(self, components, where, center, size, freq,
+                        use_centered_grid, decimation_factor):
         if self.fields is None:
             self.init_sim()
         try:
             where = self._volume_from_kwargs(where, center, size)
         except ValueError:
             where = self.fields.total_volume()
-        return self.fields.add_dft_fields(components, where, freq, use_centered_grid)
+        return self.fields.add_dft_fields(components, where, freq,
+                                          use_centered_grid, decimation_factor)
 
     def output_dft(self, dft_fields, fname):
         """
@@ -2445,6 +2466,9 @@ class Simulation(object):
         """
         if self.fields is None:
             self.init_sim()
+
+        if not self.dft_objects:
+            raise RuntimeError('DFT monitor dft_fields must be initialized before calling output_dft')
 
         if hasattr(dft_fields, 'swigobj'):
             dft_fields_swigobj = dft_fields.swigobj
@@ -3044,7 +3068,8 @@ class Simulation(object):
         self._evaluate_dft_objects()
         return self.fields.solve_cw(tol, maxiters, L)
 
-    def solve_eigfreq(self, tol=1e-7, maxiters=100, guessfreq=None, cwtol=None, cwmaxiters=10000, L=10):
+    def solve_eigfreq(self, tol=1e-7, maxiters=100,
+                      guessfreq=None, cwtol=None, cwmaxiters=10000, L=10):
         if self.fields is None:
             raise RuntimeError('Fields must be initialized before using solve_cw')
         if cwtol is None:
@@ -3228,6 +3253,9 @@ class Simulation(object):
           where `nfreq` is the number of frequencies stored in `dft_obj` as set by the
           `nfreq` parameter to `add_dft_fields`, `add_flux`, etc.
         """
+        if not self.dft_objects:
+            raise RuntimeError('DFT monitor dft_obj must be initialized before calling get_dft_array')
+
         if hasattr(dft_obj, 'swigobj'):
             dft_swigobj = dft_obj.swigobj
         else:
@@ -3590,11 +3618,15 @@ class Simulation(object):
     def reset_meep(self):
         """
         Reset all of Meep's parameters, deleting the fields, structures, etcetera, from
-        memory as if you had not run any computations.
+        memory as if you had not run any computations. If the num_chunks or chunk_layout
+        attributes have been modified internally, they are reset to their original
+        values passed in at instantiation.
         """
         self.fields = None
         self.structure = None
         self.dft_objects = []
+        self.num_chunks = self._num_chunks_original
+        self.chunk_layout = self._chunk_layout_original
         self._is_initialized = False
 
     def restart_fields(self):
@@ -3672,10 +3704,29 @@ class Simulation(object):
     def mean_time_spent_on(self, time_sink):
         """
         Return the mean time spent by all processes for a type of work `time_sink` which
-        can be one of ten integer values `0`-`9`: (`0`) connecting chunks, (`1`) time stepping,
-        (`2`) copying boundaries, (`3`) MPI all-to-all communication/synchronization,
-        (`4`) MPI one-to-one communication, (`5`) field output, (`6`) Fourier transforming,
-        (`7`) MPB mode solver, (`8`) near-to-far field transformation, and (`9`) other.
+        can be one of the following integer constants:
+        * meep.Stepping ("time stepping")
+        * meep.Connecting ("connecting chunks")
+        * meep.Boundaries ("copying boundaries")
+        * meep.MpiAllTime ("all-all communication")
+        * meep.MpiOneTime ("1-1 communication")
+        * meep.FieldOutput ("outputting fields")
+        * meep.FourierTransforming ("Fourier transforming")
+        * meep.MPBTime ("MPB mode solver")
+        * meep.GetFarfieldsTime ("far-field transform")
+        * meep.FieldUpdateB ("updating B field")
+        * meep.FieldUpdateH ("updating H field")
+        * meep.FieldUpdateD ("updating D field")
+        * meep.FieldUpdateE ("updating E field")
+        * meep.BoundarySteppingB ("boundary stepping B")
+        * meep.BoundarySteppingWH ("boundary stepping WH")
+        * meep.BoundarySteppingPH ("boundary stepping PH")
+        * meep.BoundarySteppingH ("boundary stepping H")
+        * meep.BoundarySteppingD ("boundary stepping D")
+        * meep.BoundarySteppingWE ("boundary stepping WE")
+        * meep.BoundarySteppingPE ("boundary stepping PE")
+        * meep.BoundarySteppingE ("boundary stepping E")
+        * meep.Other ("everything else")
         """
         return self.fields.mean_time_spent_on(time_sink)
 
@@ -3688,6 +3739,15 @@ class Simulation(object):
         (`7`) MPB mode solver, (`8`) near-to-far field transformation, and (`9`) other.
         """
         return self.fields.time_spent_on(time_sink)
+
+    def get_timing_data(self):
+        """
+        Returns a dictionary that maps each `time_sink` to a list with one entry
+        per process. The entries in the list correspond to the total amount of
+        time in seconds spent on a particular type of operation. The set of
+        valid time sinks is the same as for `mean_time_spent_on`.
+        """
+        return self.fields.get_timing_data()
 
     def output_times(self, fname):
         """
@@ -5218,6 +5278,43 @@ class BinaryPartition(object):
             self.right = right
         else:
             self.proc_id = proc_id
+
+    def print(self):
+        """Pretty-prints the tree structure of the BinaryPartition object."""
+        print(str(self) + " with {} chunks:".format(self.numchunks()))
+        for line in self._print(is_root=True):
+            print(line)
+
+    def _print(self, prefix="", is_root=True):
+        # pointers
+        ptr_l = ' ├L─ '
+        ext_l = ' │   '
+        ptr_r = ' └R─ '
+        ext_r = '     '
+
+        if is_root:
+            yield prefix + self._node_info()
+
+        if self.left is not None and self.right is not None:
+            yield prefix + ptr_l + self.left._node_info()
+            if self.left.left is not None and self.left.right is not None:
+                yield from self.left._print(prefix=prefix+ext_l, is_root=False)
+
+            yield prefix + ptr_r + self.right._node_info()
+            if self.right.left is not None and self.right.right is not None:
+                yield from self.right._print(prefix=prefix+ext_r, is_root=False)
+
+    def _node_info(self) -> str:
+        if self.proc_id is not None:
+            return "<proc_id={}>".format(self.proc_id)
+        else:
+            split_dir_str = {
+                mp.X: "X",
+                mp.Y: "Y",
+                mp.Z: "Z"
+            }[self.split_dir]
+            return "<split_dir={}, split_pos={}>".format(
+                split_dir_str, self.split_pos)
 
     def _numchunks(self,bp):
         if bp is None:

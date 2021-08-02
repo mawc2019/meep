@@ -1,3 +1,4 @@
+import itertools
 import os
 import re
 import sys
@@ -213,14 +214,15 @@ class TestSimulation(unittest.TestCase):
         sim.run(until=200)
         fp = sim.get_field_point(mp.Ez, mp.Vector3(x=1))
 
-        self.assertAlmostEqual(fp, -0.002989654055823199 + 0j)
+        places = 6 if mp.is_single_precision() else 7
+        self.assertAlmostEqual(fp, -0.002989654055823199, places=places)
 
         # Test unicode file name for Python 2
         if sys.version_info[0] == 2:
             sim = self.init_simple_simulation(epsilon_input_file=unicode(eps_input_path))
             sim.run(until=200)
             fp = sim.get_field_point(mp.Ez, mp.Vector3(x=1))
-            self.assertAlmostEqual(fp, -0.002989654055823199 + 0j)
+            self.assertAlmostEqual(fp, -0.002989654055823199)
 
     def test_numpy_epsilon(self):
         sim = self.init_simple_simulation()
@@ -233,7 +235,9 @@ class TestSimulation(unittest.TestCase):
 
         sim.run(until=200)
         fp = sim.get_field_point(mp.Ez, mp.Vector3(x=1))
-        self.assertAlmostEqual(fp, -0.002989654055823199 + 0j)
+
+        places = 6 if mp.is_single_precision() else 7
+        self.assertAlmostEqual(fp, -0.002989654055823199, places=places)
 
     def test_set_materials(self):
 
@@ -506,7 +510,10 @@ class TestSimulation(unittest.TestCase):
         with self.assertRaises(TypeError):
             mp.vec(1, [2, 3])
 
+    @unittest.skipIf(mp.is_single_precision(), "double-precision floating point specific test")
     def test_epsilon_warning(self):
+        ## fields blow up using dispersive material
+        ## when compiled using single precision
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -578,6 +585,55 @@ class TestSimulation(unittest.TestCase):
         sim.run(mp.at_end(print_field), until=50)
 
         self.assertAlmostEqual(result[0], -0.0599602798684155)
+
+    def test_timing_data(self):
+        resolution = 20
+        cell_size = mp.Vector3(10, 10)
+        pml = [mp.PML(1)]
+        center = mp.Vector3(2, -1)
+        result = []
+        fcen = 0.15
+        df = 0.1
+
+        sources = [mp.Source(src=mp.GaussianSource(fcen, fwidth=df), component=mp.Ez,
+                             center=mp.Vector3())]
+        geometry = [mp.Block(center=mp.Vector3(), size=mp.Vector3(mp.inf, 3, mp.inf),
+                             material=mp.Medium(epsilon=12))]
+
+        sim = mp.Simulation(resolution=resolution, cell_size=cell_size, boundary_layers=pml,
+                            sources=sources, geometry=geometry, geometry_center=center)
+        sim.run(until=50)
+        timing_data = sim.get_timing_data()
+
+        # Non-exhaustive collection of steps where some time should be spent:
+        EXPECTED_NONZERO_TIMESINKS = (mp.Stepping, mp.Boundaries,
+                                      mp.FieldUpdateB, mp.FieldUpdateH,
+                                      mp.FieldUpdateD, mp.FieldUpdateE)
+        # Due to the problem setup, no time should be spent on these steps:
+        EXPECTED_ZERO_TIMESINKS = (mp.MPBTime, mp.GetFarfieldsTime)
+
+        for sink in itertools.chain(EXPECTED_NONZERO_TIMESINKS,
+                                    EXPECTED_ZERO_TIMESINKS):
+            self.assertIn(sink, timing_data.keys())
+            self.assertEqual(len(timing_data[sink]), mp.count_processors())
+            np.testing.assert_array_equal(sim.time_spent_on(sink),
+                                          timing_data[sink])
+
+        for sink in EXPECTED_NONZERO_TIMESINKS:
+            for t in timing_data[sink]:
+                self.assertGreater(t, 0)
+
+        for sink in EXPECTED_ZERO_TIMESINKS:
+            for t in timing_data[sink]:
+                self.assertEqual(t, 0)
+
+        self.assertGreaterEqual(
+            sum(timing_data[mp.Stepping]),
+            sum(timing_data[mp.FieldUpdateB]) +
+            sum(timing_data[mp.FieldUpdateH]) +
+            sum(timing_data[mp.FieldUpdateD]) +
+            sum(timing_data[mp.FieldUpdateE]) +
+            sum(timing_data[mp.FourierTransforming]))
 
     def test_source_slice(self):
         sim = self.init_simple_simulation()

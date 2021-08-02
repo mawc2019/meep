@@ -1429,9 +1429,34 @@ void _get_gradient(PyObject *grad, PyObject *fields_a, PyObject *fields_f, PyObj
   $1 = temp.get();
 }
 
+%typemap(out) const meep::binary_partition * {
+  $result = bp_to_py_bp($1);
+}
+
 %typemap(arginit) meep::binary_partition * {
     $1 = NULL;
 }
+
+
+// typemaps for timing data
+
+%typemap(out) std::unordered_map<meep::time_sink, std::vector<double>, std::hash<int> > {
+  PyObject *out_dict = PyDict_New();
+  for (const auto& ts_vec : $1) {
+    const std::vector<double>& timing_vector = ts_vec.second;
+    PyObject *res = PyList_New(timing_vector.size());
+    for (size_t i = 0; i < timing_vector.size(); ++i) {
+      PyList_SetItem(res, i, PyFloat_FromDouble(timing_vector[i]));
+    }
+    PyObject *key = PyInteger_FromLong(static_cast<int>(ts_vec.first));
+    PyDict_SetItem(out_dict, key, res);
+
+    Py_DECREF(key);
+    Py_DECREF(res);
+  }
+  $result = out_dict;
+}
+
 
 // Tells Python to take ownership of the h5file* this function returns so that
 // it gets garbage collected and the file gets closed.
@@ -1469,9 +1494,23 @@ void _get_gradient(PyObject *grad, PyObject *fields_a, PyObject *fields_f, PyObj
 %ignore is_medium;
 %ignore is_medium;
 %ignore is_metal;
+%ignore meep::all_in_or_out;
+%ignore meep::all_connect_phases;
 %ignore meep::choose_chunkdivision;
+%ignore meep::comms_key;
+%ignore meep::comms_key_hash_fn;
+%ignore meep::comms_manager;
+%ignore meep::comms_operation;
+%ignore meep::comms_sequence;
+%ignore meep::create_comms_manager;
+%ignore meep::fields::get_time_spent_on;
+%ignore meep::fields::times_spent;
+%ignore meep::fields::was_working_on;
+%ignore meep::fields::with_timing_scope;
+%ignore meep::fields::working_on;
 %ignore meep::fields_chunk;
 %ignore meep::infinity;
+%ignore meep::timing_scope;
 
 %ignore std::vector<meep::volume>::vector(size_type);
 %ignore std::vector<meep::volume>::resize;
@@ -1832,6 +1871,10 @@ PyObject *_get_array_slice_dimensions(meep::fields *f, const meep::volume &where
 
 size_t get_realnum_size() {
   return sizeof(meep::realnum);
+}
+
+bool is_single_precision() {
+  return sizeof(meep::realnum) == sizeof(float);
 }
 
 meep::structure *create_structure_and_set_materials(vector3 cell_size,
