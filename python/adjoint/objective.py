@@ -43,13 +43,18 @@ class ObjectiveQuantity(abc.ABC):
 
     def get_evaluation(self):
         """Evaluates the objective quantity."""
+        try:
+            return self._eval
+        except AttributeError:
+            raise RuntimeError("You must first run a forward simulation before resquesting an eigenmode coefficient.")
+        '''
         if self._eval:
             return self._eval
         else:
             raise RuntimeError(
                 'You must first run a forward simulation before requesting the evaluation of an objective quantity.'
             )
-
+        '''
     def _adj_src_scale(self, include_resolution=True):
         """Calculates the scale for the adjoint sources."""
         T = self.sim.meep_time()
