@@ -261,12 +261,12 @@ class FourierFields(ObjectiveQuantity):
             scale = amp_arr * self._adj_src_scale(include_resolution=False) #adj_src_scale(self, dt, include_resolution=False)
             
             if self.num_freq == 1:
-                self.sources += [mp.IndexedSource(self.time_src, near_data, scale[:,0])]
+                self.sources += [mp.IndexedSource(self.time_src, near_data, scale[:,0], not self.yee_grid)]
             else:
                 src = FilteredSource(self.time_src.frequency,self._frequencies,scale,dt)
                 (num_basis, num_pts) = src.nodes.shape
                 for basis_i in range(num_basis):
-                    self.sources += [mp.IndexedSource(src.time_src_bf[basis_i], near_data, src.nodes[basis_i])]
+                    self.sources += [mp.IndexedSource(src.time_src_bf[basis_i], near_data, src.nodes[basis_i], not self.yee_grid)]
 
         return self.sources
     

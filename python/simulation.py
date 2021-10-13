@@ -2445,7 +2445,7 @@ class Simulation(object):
             self.init_sim()
 
         if isinstance(src, IndexedSource):
-            self.fields.add_srcdata(src.srcdata, src.src.swigobj, src.num_pts, src.amp_arr,needs_boundary_fix=True)
+            self.fields.add_srcdata(src.srcdata, src.src.swigobj, src.num_pts, src.amp_arr,src.needs_boundary_fix)
             return
 
         where = Volume(src.center, src.size, dims=self.dimensions,
