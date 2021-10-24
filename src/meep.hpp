@@ -942,6 +942,8 @@ public:
   src_time() {
     is_integrated = true;
     id = 0;
+    //printf("id = 0\n");
+     //std::cout << "id: " << id <<std::endl;
     current_time = nan;
     current_current = 0.0;
     next = NULL;
@@ -952,6 +954,7 @@ public:
     current_time = t.current_time;
     current_current = t.current_current;
     current_dipole = t.current_dipole;
+    id = t.id;
     if (t.next)
       next = t.next->clone();
     else

@@ -22,7 +22,7 @@
 #include <math.h>
 #include <complex>
 #include <assert.h>
-
+#include <iostream>
 #include "meep.hpp"
 #include "meep_internals.hpp"
 
@@ -354,12 +354,16 @@ void fields::register_src_time(src_time *src) {
       max_id = s->id > max_id ? s->id : max_id;
     src->id = max_id + 1;
   }
+    //std::cout << "src->id given by register_src_time: " << src->id <<std::endl;
 }
 
 src_time *fields::lookup_src_time(size_t id) {
   if (id == 0) abort("bug: cannot lookup unregistered source");
-  for (src_time *s = sources; s; s = s->next)
+  for (src_time *s = sources; s; s = s->next){
+    std::cout << "lookup_src_time is working. " <<std::endl;
+    if (s->id == id) std::cout << "lookup_src_time finds the id. " <<std::endl;
     if (s->id == id) return s;
+  }
   return NULL;
 }
 
