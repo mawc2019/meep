@@ -30,7 +30,7 @@
 #include "meep/vec.hpp"
 #include "meep/mympi.hpp"
 #include "meep/meep-config.h"
-
+#include <iostream>
 namespace meep {
 
 /* The (time-domain) fields arrays of the fields_chunk class as well
@@ -943,7 +943,7 @@ public:
     is_integrated = true;
     id = 0;
     //printf("id = 0\n");
-     //std::cout << "id: " << id <<std::endl;
+    std::cout << "src_time id assigned at meep.hpp: " << id <<std::endl;
     current_time = nan;
     current_current = 0.0;
     next = NULL;

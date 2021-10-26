@@ -349,12 +349,13 @@ complex<double> amp_file_func(const vec &p) {
 void fields::register_src_time(src_time *src) {
   sources = src->add_to(sources, &src);
   if (src->id == 0) { // doesn't have an ID yet
+    std::cout << "src doesn't have an ID yet. " <<std::endl;
     size_t max_id = 0;
     for (src_time *s = sources; s; s = s->next)
       max_id = s->id > max_id ? s->id : max_id;
     src->id = max_id + 1;
   }
-    //std::cout << "src->id given by register_src_time: " << src->id <<std::endl;
+  std::cout << "src->id given by register_src_time: " << src->id <<std::endl;
 }
 
 src_time *fields::lookup_src_time(size_t id) {

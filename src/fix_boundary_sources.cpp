@@ -57,19 +57,19 @@ void fields::fix_boundary_sources() {
             ivec here = chunks[i]->gv.iloc(c, src.index_at(ipt));
             if (!chunks[i]->gv.owns(here) && src.amplitude(ipt) != 0.0) {
               if (src.t()->id == 0) abort("bug: fix_boundary_sources called for non-registered source");
-                //std::cout << "src.t()->id: " << src.t()->id <<std::endl;
+                std::cout << "src.t()->id: " << src.t()->id <<std::endl;
               // find the chunk that owns this point, similar to logic in boundaries.cpp
               std::complex<double> thephase;
               if (locate_component_point(&c, &here, &thephase) && !on_metal_boundary(here)) {
-                //std::cout << "num_chunks: " << num_chunks <<std::endl;
+                std::cout << "num_chunks: " << num_chunks <<std::endl;
                 for (int j = 0; j < num_chunks; j++)
                   if (chunks[j]->gv.owns(here)) {
-                    //std::cout << "chunks[j]->gv.owns(here) is true at j = " << j <<std::endl;
+                    std::cout << "chunks[j]->gv.owns(here) is true at j = " << j <<std::endl;
                     srcpt_info s = { src.amplitude(ipt)*conj(thephase), chunks[j]->gv.index(c, here),  src.t()->id, chunks[j]->chunk_idx, c };
                     boundarysources.push_back(s);
                     break;
                   }
-                //std::cout << "boundarysources.size() earlier: " << boundarysources.size() <<std::endl;
+                std::cout << "boundarysources.size() earlier: " << boundarysources.size() <<std::endl;
               }
               src.set_amplitude(ipt, 0.0); // will no longer be needed
             }
@@ -93,7 +93,7 @@ void fields::fix_boundary_sources() {
   std::vector<size_t> numcomm_(P * P, size_t(0));
   size_t idx0 = 0;
   int p0 = 0;
-  //std::cout << "boundarysources.size() later: " << boundarysources.size() <<std::endl;
+  std::cout << "boundarysources.size() later: " << boundarysources.size() <<std::endl;
   for (size_t idx = 0; idx < boundarysources.size(); ++idx) {
     int pidx = chunks[boundarysources[idx].chunk_idx]->n_proc();
     if (pidx != p0) {
@@ -134,11 +134,11 @@ for (int psrc = 0; psrc < P; ++psrc)
       }
       else
 #endif
-      //std::cout << "boundarysources.data(): " << boundarysources.data() <<std::endl;
+      std::cout << "boundarysources.data(): " << boundarysources.data() <<std::endl;
       srcpts = boundarysources.data() + offsets[psrc*P + pdest];
       int chunk_idx = srcpts[0].chunk_idx;
       size_t src_time_id = srcpts[0].src_time_id;
-      //std::cout << "src_time_id =  srcpts[0].src_time_id at index 0: " << src_time_id <<std::endl;
+      std::cout << "src_time_id =  srcpts[0].src_time_id at index 0: " << src_time_id <<std::endl;
       int c = srcpts[0].c;
       size_t idx0 = 0;
       for (size_t idx = 0; idx <= N; ++idx) {
@@ -150,7 +150,7 @@ for (int psrc = 0; psrc < P; ++psrc)
             amp_arr[i-idx0] = srcpts[i].A;
           }
           sourcedata srcdata = { (component) c, idx_arr, chunk_idx, amp_arr };
-          //std::cout << "src_time_id =  srcpts[idx].src_time_id at index " << idx << ": " << src_time_id <<std::endl;
+          std::cout << "src_time_id =  srcpts[idx].src_time_id at index " << idx << ": " << src_time_id <<std::endl;
           src_time *srctime = lookup_src_time(src_time_id);
           if (srctime == NULL) abort("bug: unknown src_time_id (missing registration?)");
           add_srcdata(srcdata, srctime, size_t(0), NULL, false);
