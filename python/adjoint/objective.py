@@ -252,7 +252,10 @@ class FourierFields(ObjectiveQuantity):
 
     def place_adjoint_source(self,dJ):
         dt = self.sim.fields.dt # the timestep size from sim.fields.dt of the forward sim
-        self.sources = []
+        time_src = self._create_time_profile()
+        #self.sim.fields.register_src_time(time_src.swigobj)
+        
+        sources = []
         dJ = dJ.flatten()
         min_max_corners = self.sim.fields.get_corners(self._monitor.swigobj, self.component) # get the ivec values of the corners
         self.all_fouriersrcdata = self._monitor.swigobj.fourier_sourcedata(self.volume.swigobj, min_max_corners, dJ)
@@ -262,18 +265,18 @@ class FourierFields(ObjectiveQuantity):
             scale = amp_arr * self._adj_src_scale(include_resolution=False) #adj_src_scale(self, dt, include_resolution=False)
             
             if self.num_freq == 1:
-                self.sources += [mp.IndexedSource(self.time_src, near_data, scale[:,0], not self.yee_grid)]
+                sources += [mp.IndexedSource(time_src, near_data, scale[:,0], not self.yee_grid)]
             else:
-                src = FilteredSource(self.time_src.frequency,self._frequencies,scale,dt)
+                src = FilteredSource(time_src.frequency,self._frequencies,scale,dt)
                 (num_basis, num_pts) = src.nodes.shape
                 for basis_i in range(num_basis):
-                    self.sources += [mp.IndexedSource(src.time_src_bf[basis_i], near_data, src.nodes[basis_i], not self.yee_grid)]
-
-        return self.sources
+                    sources += [mp.IndexedSource(src.time_src_bf[basis_i], near_data, src.nodes[basis_i], not self.yee_grid)]
+        
+        return sources
     
     def __call__(self):
         self._eval = np.array([self.sim.get_dft_array(self._monitor, self.component, i) for i in range(self.num_freq)])
-        self.time_src = self._create_time_profile()
+        #self.time_src = self._create_time_profile()
         return self._eval
 
 

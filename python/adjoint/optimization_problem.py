@@ -287,7 +287,7 @@ class OptimizationProblem(object):
     def adjoint_run(self):
         # set up adjoint sources and monitors
         self.prepare_adjoint_run()
-
+        print("prepare_adjoint_run is done.")
         if self.sim.is_cylindrical or self.sim.dimensions == mp.CYLINDRICAL:
             self.sim.m = -self.sim.m
 
@@ -299,7 +299,8 @@ class OptimizationProblem(object):
 
             # Update the sources
             self.sim.change_sources(self.adjoint_sources[ar])
-
+            
+            #self.sim.fields.register_src_time(self.sources.swigobj)
             # register design flux
             self.design_region_monitors = [
                 self.sim.add_dft_fields(

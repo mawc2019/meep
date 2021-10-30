@@ -3775,6 +3775,10 @@ class Simulation(object):
         `Source` objects.
         """
         self.sources = new_sources
+        #self.fields.register_src_time(self.sources.swigobj)
+        #if self.sources != None:
+            #self.fields.register_src_time(self.sources.swigobj)
+            #print("self.sources == None")
         if self.fields:
             self.fields.remove_sources()
             self.add_sources()
