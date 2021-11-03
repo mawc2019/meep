@@ -20,7 +20,7 @@
 #include <math.h>
 #include <string.h>
 #include <algorithm>
-
+#include <assert.h>
 #include "meep.hpp"
 #include "meep_internals.hpp"
 

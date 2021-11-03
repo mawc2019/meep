@@ -155,7 +155,7 @@ def adjoint_solver(design_params, mon_type, frequencies=None, mat2=silicon):
         obj_list = [mpa.FourierFields(sim,
                                       mp.Volume(center=mp.Vector3(1.25),
                                                 size=mp.Vector3(0.25,1,0)),
-                                      mp.Ez)]
+                                      mp.Ez, yee_grid=True)]
 
         def J(mode_mon):
             return npa.power(npa.abs(mode_mon[:,4,10]),2)
@@ -244,7 +244,7 @@ def adjoint_solver_complex_fields(design_params, frequencies=None):
     obj_list = [mpa.FourierFields(sim,
                                   mp.Volume(center=mp.Vector3(0.9),
                                             size=mp.Vector3(0.2,0.5)),
-                                  mp.Ez)]
+                                  mp.Ez, yee_grid=True)]
 
     def J(dft_mon):
         return npa.power(npa.abs(dft_mon[:,3,9]),2)
