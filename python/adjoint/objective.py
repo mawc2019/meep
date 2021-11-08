@@ -231,7 +231,7 @@ class EigenmodeCoefficient(ObjectiveQuantity):
 
 
 class FourierFields(ObjectiveQuantity):
-    def __init__(self, sim, volume, component, yee_grid, decimation_factor=0):
+    def __init__(self, sim, volume, component, yee_grid=False, decimation_factor=0):
         super().__init__(sim)
         self.volume = sim._fit_volume_to_simulation(volume)
         self.component = component
