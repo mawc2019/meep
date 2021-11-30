@@ -2451,6 +2451,7 @@ class Simulation(object):
             self.init_sim()
 
         if isinstance(src, IndexedSource):
+            self.fields.register_src_time(src.src.swigobj)
             self.fields.add_srcdata(src.srcdata, src.src.swigobj, src.num_pts, src.amp_arr,src.needs_boundary_fix)
             return
 
