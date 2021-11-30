@@ -281,7 +281,8 @@ void get_epsilon_grid(geometric_object_list gobj_list,
                       int nx, const double *x,
                       int ny, const double *y,
                       int nz, const double *z,
-                      double *grid_vals);
+                      std::complex<double> *grid_vals,
+                      double frequency = 0);
 void init_libctl(material_type default_mat, bool ensure_per,
                  meep::grid_volume *gv, vector3 cell_size, vector3 cell_center,
                  geometric_object_list *geom_list);
@@ -298,7 +299,7 @@ geom_box_tree calculate_tree(const meep::volume &v, geometric_object_list g);
 void material_grids_addgradient(double *v, size_t ng, std::complex<double> *fields_a,
                                 std::complex<double> *fields_f, size_t fields_shapes[12],
                                 double *frequencies, double scalegrad,
-                                meep::grid_volume &gv, meep::volume &where, geom_epsilon *geps);
+                                meep::grid_volume &gv, meep::volume &where, geom_epsilon *geps,double du=1e-6);
 
 /***************************************************************/
 /* routines in GDSIIgeom.cc ************************************/

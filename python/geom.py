@@ -529,7 +529,7 @@ class MaterialGrid(object):
     the `default_material` argument of the [`Simulation`](#Simulation) constructor (similar to a
     [material function](#medium)).
     """
-    def __init__(self,grid_size,medium1,medium2,weights=None,grid_type="U_DEFAULT",do_averaging=False,beta=0,eta=0.5,damping=0):
+    def __init__(self,grid_size,medium1,medium2,weights=None,grid_type="U_DEFAULT",do_averaging=True,beta=0,eta=0.5,damping=0):
         """
         Creates a `MaterialGrid` object.
 
@@ -1165,6 +1165,9 @@ class Prism(GeometricObject):
           [centroid](https://en.wikipedia.org/wiki/Centroid) of all the vertices (top and
           bottom) of the resulting 3d prism so that the coordinates of the `vertices` are
           shifted accordingly.
+
+        + **`sidewall_angle` [`number`]** — The sidewall angle of the prism in units of
+          radians. Default is 0.
         """
 
         centroid = sum(vertices, Vector3(0)) * (1.0 / len(vertices)) # centroid of floor polygon
