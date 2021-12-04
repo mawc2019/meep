@@ -488,17 +488,22 @@ class TestAdjointSolver(ApproxComparisonTestCase):
 
         for frequencies in [[1/1.58, fcen, 1/1.53]]:
             ## compute gradient using adjoint solver
-            adjsol_obj, adjsol_grad = adjoint_solver_damping(p, frequencies)
+            filter_radius = 0.12
+            p_filtered = mpa.conic_filter(
+                np.reshape(p,(Nx,Ny)),filter_radius,design_region_size.x,design_region_size.y,design_region_resolution).flatten()
+            adjsol_obj, adjsol_grad = adjoint_solver_damping(p_filtered, frequencies)
 
             ## compute unperturbed S12
-            S12_unperturbed = forward_simulation_damping(p, frequencies)
+            S12_unperturbed = forward_simulation_damping(p_filtered, frequencies)
 
             ## compare objective results
             print("S12 -- adjoint solver: {}, traditional simulation: {}".format(adjsol_obj,S12_unperturbed))
             self.assertClose(adjsol_obj,S12_unperturbed,epsilon=1e-6)
 
             ## compute perturbed S12
-            S12_perturbed = forward_simulation_damping(p+dp, frequencies)
+            p_plus_dp_filtered = mpa.conic_filter(
+                np.reshape(p+dp,(Nx,Ny)),filter_radius,design_region_size.x,design_region_size.y,design_region_resolution).flatten()
+            S12_perturbed = forward_simulation_damping(p_plus_dp_filtered, frequencies)
 
             ## compare gradients
             if adjsol_grad.ndim < 2:
