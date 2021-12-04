@@ -487,10 +487,14 @@ class TestAdjointSolver(ApproxComparisonTestCase):
         print("*** TESTING CONDUCTIVITIES ***")
 
         for frequencies in [[1/1.58, fcen, 1/1.53]]:
-            ## compute gradient using adjoint solver
+            ## filter the design field
             filter_radius = 0.12
             p_filtered = mpa.conic_filter(
                 np.reshape(p,(Nx,Ny)),filter_radius,design_region_size.x,design_region_size.y,design_region_resolution).flatten()
+            p_plus_dp_filtered = mpa.conic_filter(
+                np.reshape(p+dp,(Nx,Ny)),filter_radius,design_region_size.x,design_region_size.y,design_region_resolution).flatten()
+            
+            ## compute gradient using adjoint solver
             adjsol_obj, adjsol_grad = adjoint_solver_damping(p_filtered, frequencies)
 
             ## compute unperturbed S12
@@ -501,8 +505,6 @@ class TestAdjointSolver(ApproxComparisonTestCase):
             self.assertClose(adjsol_obj,S12_unperturbed,epsilon=1e-6)
 
             ## compute perturbed S12
-            p_plus_dp_filtered = mpa.conic_filter(
-                np.reshape(p+dp,(Nx,Ny)),filter_radius,design_region_size.x,design_region_size.y,design_region_resolution).flatten()
             S12_perturbed = forward_simulation_damping(p_plus_dp_filtered, frequencies)
 
             ## compare gradients
