@@ -676,16 +676,21 @@ frequency-independent part of $\mu$ (the $\omega\to\infty$ limit).
 <div class="class_members" markdown="1">
 
 ```python
-def get_epsilon_grid(self, xtics=None, ytics=None, ztics=None):
+def get_epsilon_grid(self,
+                     xtics=None,
+                     ytics=None,
+                     ztics=None,
+                     frequency=0):
 ```
 
 <div class="method_docstring" markdown="1">
 
 Given three 1d NumPy arrays (`xtics`,`ytics`,`ztics`) which define the coordinates of a Cartesian
-grid anywhere within the cell volume, compute the trace of the $\varepsilon$ tensor from the `geometry`
-exactly at each grid point. (For [`MaterialGrid`](#materialgrid)s, the $\varepsilon$ at each grid
-point is computed using bilinear interpolation from the nearest `MaterialGrid` points and possibly also
-projected to form a level set.) Note that this is different from `get_epsilon_point` which computes
+grid anywhere within the cell volume, compute the trace of the $\varepsilon(f)$ tensor at frequency
+$f$ (in Meep units) from the `geometry` exactly at each grid point. `frequency` defaults to 0 which is
+the instantaneous $\varepsilon$. (For [`MaterialGrid`](#materialgrid)s, the $\varepsilon$ at each
+grid point is computed using bilinear interpolation from the nearest `MaterialGrid` points and possibly
+also projected to form a level set.) Note that this is different from `get_epsilon_point` which computes
 $\varepsilon$ by bilinearly interpolating from the nearest Yee grid points. This function is useful for
 sampling the material geometry to any arbitrary resolution. The return value is a NumPy array with shape
 equivalent to `numpy.meshgrid(xtics,ytics,ztics)`. Empty dimensions are collapsed.
@@ -2067,7 +2072,7 @@ including outside the cell and a `near2far` object, returns the computed
 of fields $(E_x^1,E_y^1,E_z^1,H_x^1,H_y^1,H_z^1,E_x^2,E_y^2,E_z^2,H_x^2,H_y^2,H_z^2,...)$
 in Cartesian coordinates and
 $(E_r^1,E_\phi^1,E_z^1,H_r^1,H_\phi^1,H_z^1,E_r^2,E_\phi^2,E_z^2,H_r^2,H_\phi^2,H_z^2,...)$
-in cylindrical coordinates for the frequencies 1,2,…,`nfreq`.
+in cylindrical coordinates for the frequencies 1,2,...,`nfreq`.
 
 </div>
 
@@ -2442,7 +2447,7 @@ Loads a fields from the file `fname`.
 
 </div>
 
-#### Checkpoint / Restore.
+#### Checkpoint and Restore
 
 The above dump/load related functions can be used to implement a
 checkpoint/restore *like* feature. The caveat of this feature is that
@@ -2512,7 +2517,7 @@ sim2.run(...)  # continues from t=xx
 
 ### Frequency-Domain Solver
 
-Meep contains a frequency-domain solver that computes the fields produced in a geometry in response to a [continuous-wave (CW) source](https://en.wikipedia.org/wiki/Continuous_wave). This is based on an [iterative linear solver](https://en.wikipedia.org/wiki/Iterative_method) instead of time-stepping. For details, see Section 5.3 ("Frequency-domain solver") of [Computer Physics Communications, Vol. 181, pp. 687-702, 2010](http://ab-initio.mit.edu/~oskooi/papers/Oskooi10.pdf). Benchmarking results have shown that in many instances, such as cavities (e.g., [ring resonators](Python_Tutorials/Frequency_Domain_Solver.md)) with long-lived resonant modes, this solver converges much faster than simply running an equivalent time-domain simulation with a CW source (using the default `width` of zero for no transient turn-on), time-stepping until all transient effects from the source turn-on have disappeared, especially if the fields are desired to a very high accuracy.
+Meep contains a frequency-domain solver that computes the fields produced in a geometry in response to a [continuous-wave (CW) source](https://en.wikipedia.org/wiki/Continuous_wave). This is based on an [iterative linear solver](https://en.wikipedia.org/wiki/Iterative_method) instead of time-stepping. For details, see Section 5.3 ("Frequency-domain solver") of [Computer Physics Communications, Vol. 181, pp. 687-702 (2010)](http://ab-initio.mit.edu/~oskooi/papers/Oskooi10.pdf). Benchmarking results have shown that in many instances, such as cavities (e.g., [ring resonators](Python_Tutorials/Frequency_Domain_Solver.md)) with long-lived resonant modes, this solver converges much faster than simply running an equivalent time-domain simulation with a CW source (using the default `width` of zero for no transient turn-on), time-stepping until all transient effects from the source turn-on have disappeared, especially if the fields are desired to a very high accuracy.
 
 To use the frequency-domain solver, simply define a `ContinuousSource` with the desired frequency and [initialize the fields and geometry](#initializing-the-structure-and-fields) via `init_sim()`:
 
@@ -2609,7 +2614,7 @@ fr = mp.FluxRegion(volume=mp.GDSII_vol(fname, layer, zmin, zmax))
 
 ### Data Visualization
 
-This module provides basic visualization functionality for the simulation domain. The spirit of the module is to provide functions that can be called with *no customization options whatsoever* and will do useful relevant things by default, but which can also be customized in cases where you *do* want to take the time to spruce up the output. The `Simulation` class provides the following methods:
+This module provides basic visualization functionality for the simulation domain. The intent of the module is to provide functions that can be called with *no customization options whatsoever* and will do useful relevant things by default, but which can also be customized in cases where you *do* want to take the time to spruce up the output. The `Simulation` class provides the following methods:
 
 
 <a id="Simulation.plot2D"></a>
@@ -2648,14 +2653,18 @@ sim.run(...)
 field_func = lambda x: 20*np.log10(np.abs(x))
 import matplotlib.pyplot as plt
 sim.plot2D(fields=mp.Ez,
-        field_parameters={'alpha':0.8, 'cmap':'RdBu', 'interpolation':'none', 'post_process':field_func},
-        boundary_parameters={'hatch':'o', 'linewidth':1.5, 'facecolor':'y', 'edgecolor':'b', 'alpha':0.3})
+           field_parameters={'alpha':0.8, 'cmap':'RdBu', 'interpolation':'none', 'post_process':field_func},
+           boundary_parameters={'hatch':'o', 'linewidth':1.5, 'facecolor':'y', 'edgecolor':'b', 'alpha':0.3})
 plt.show()
 plt.savefig('sim_domain.png')
 ```
+If you just want to quickly visualize the simulation domain without the fields (i.e., when
+setting up your simulation), there is no need to invoke the `run` function prior to calling
+`plot2D`. Just define the `Simulation` object followed by any DFT monitors and then
+invoke `plot2D`.
 
-Note: When running a [parallel simulation](Parallel_Meep.md), the `plot2D` function expects to be called
-on all processes, but only generates a plot on the master process.
+Note: When running a [parallel simulation](Parallel_Meep.md), the `plot2D` function expects
+to be called on all processes, but only generates a plot on the master process.
 
 **Parameters:**
 
@@ -2677,6 +2686,12 @@ on all processes, but only generates a plot on the master process.
     - `alpha=1.0`: transparency of geometry
     - `contour=False`: if `True`, plot a contour of the geometry rather than its image
     - `contour_linewidth=1`: line width of the contour lines if `contour=True`
+    - `frequency=None`: for materials with a [frequency-dependent
+      permittivity](Materials.md#material-dispersion) $\varepsilon(f)$, specifies the
+      frequency $f$ (in Meep units) of the real part of the permittivity to use in the
+      plot. Defaults to the `frequency` parameter of the [Source](#source) object.
+    - `resolution=None`: the resolution of the $\varepsilon$ grid. Defaults to the
+      `resolution` of the `Simulation` object.
 * `boundary_parameters`: a `dict` of optional plotting parameters that override
   the default parameters for the boundary layers.
     - `alpha=1.0`: transparency of boundary layers
@@ -2713,10 +2728,6 @@ on all processes, but only generates a plot on the master process.
     - `alpha=0.6`: transparency of fields
     - `post_process=np.real`: post processing function to apply to fields (must be
       a function object)
-* `frequency`: for materials with a [frequency-dependent
-  permittivity](Materials.md#material-dispersion) $\varepsilon(f)$, specifies the
-  frequency $f$ (in Meep units) of the real part of the permittivity to use in the
-  plot. Defaults to the `frequency` parameter of the [Source](#source) object.
 
 </div>
 
@@ -3598,7 +3609,8 @@ current simulation time.
   fetching the same slice repeatedly at different times).
 
 + `frequency`: optional frequency point over which the average eigenvalue of the
-  $\varepsilon$ and $\mu$ tensors are evaluated (defaults to 0).
+  $\varepsilon$ and $\mu$ tensors are evaluated. Defaults to 0 which is the
+  instantaneous $\varepsilon$.
 
 + `snap`: By default, the elements of the grid slice are obtained using a bilinear
   interpolation of the nearest Yee grid points. Empty dimensions of the grid slice
@@ -4400,7 +4412,7 @@ def __init__(self,
              medium2,
              weights=None,
              grid_type='U_DEFAULT',
-             do_averaging=False,
+             do_averaging=True,
              beta=0,
              eta=0.5,
              damping=0):
@@ -5699,6 +5711,9 @@ Construct a `Prism`.
   bottom) of the resulting 3d prism so that the coordinates of the `vertices` are
   shifted accordingly.
 
++ **`sidewall_angle` [`number`]** — The sidewall angle of the prism in units of
+  radians. Default is 0.
+
 </div>
 
 </div>
@@ -6478,6 +6493,7 @@ def __init__(self,
              fwidth=inf,
              cutoff=3.0,
              wavelength=None,
+             is_integrated=False,
              **kwargs):
 ```
 
@@ -6552,6 +6568,7 @@ def __init__(self,
              fwidth=inf,
              start_time=0,
              cutoff=5.0,
+             is_integrated=False,
              wavelength=None,
              **kwargs):
 ```
@@ -6638,6 +6655,7 @@ def __init__(self,
              src_func,
              start_time=-1e+20,
              end_time=1e+20,
+             is_integrated=False,
              center_frequency=0,
              fwidth=0,
              **kwargs):
@@ -6886,7 +6904,7 @@ A class used to record the fields during timestepping (i.e., a [`run`](#run-func
 function). The object is initialized prior to timestepping by specifying the
 simulation object and the field component. The object can then be passed to any
 [step-function modifier](#step-function-modifiers). For example, one can record the
-E<sub>z</sub> fields at every one time unit using:
+$E_z$ fields at every one time unit using:
 
 ```py
 animate = mp.Animate2D(sim,

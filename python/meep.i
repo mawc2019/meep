@@ -767,7 +767,6 @@ meep::volume_list *make_volume_list(const meep::volume &v, int c,
 %typemap(freearg) GEOMETRIC_OBJECT {
     if ($1.material) {
         material_free((material_data *)$1.material);
-        delete (material_data *)$1.material;
         geometric_object_destroy($1);
     }
 }
@@ -846,7 +845,7 @@ meep::volume_list *make_volume_list(const meep::volume &v, int c,
 %inline %{
 void _get_gradient(PyObject *grad, double scalegrad, PyObject *fields_a, PyObject *fields_f, 
     meep::grid_volume *grid_volume, meep::volume *where, PyObject *frequencies, 
-    meep_geom::geom_epsilon *geps, PyObject *fields_shapes) {
+    meep_geom::geom_epsilon *geps, PyObject *fields_shapes, double fd_step) {
     // clean the gradient array
     PyArrayObject *pao_grad = (PyArrayObject *)grad;
     if (!PyArray_Check(pao_grad)) meep::abort("grad parameter must be numpy array.");
@@ -884,7 +883,7 @@ void _get_gradient(PyObject *grad, double scalegrad, PyObject *fields_a, PyObjec
     if (PyArray_DIMS(pao_grad)[0] != nf) meep::abort("Numpy grad array is allocated for %td frequencies; it should be allocated for %td.",PyArray_DIMS(pao_grad)[0],nf);
 
     // calculate the gradient
-    meep_geom::material_grids_addgradient(grad_c,ng,fields_a_c,fields_f_c,fields_shapes_c,frequencies_c,scalegrad,*grid_volume,*where,geps);
+    meep_geom::material_grids_addgradient(grad_c,ng,fields_a_c,fields_f_c,fields_shapes_c,frequencies_c,scalegrad,*grid_volume,*where,geps,fd_step);
 }
 %}
 
@@ -983,7 +982,6 @@ void _get_gradient(PyObject *grad, double scalegrad, PyObject *fields_a, PyObjec
 %typemap(freearg) material_type {
     if ($1) {
         material_free($1);
-        delete $1;
     }
 }
 
@@ -1101,12 +1099,12 @@ void _get_gradient(PyObject *grad, double scalegrad, PyObject *fields_a, PyObjec
     $1 = (double *)array_data($input);
 }
 
-%typecheck(SWIG_TYPECHECK_POINTER, fragment="NumPy_Fragments") double* grid_vals {
+%typecheck(SWIG_TYPECHECK_POINTER, fragment="NumPy_Fragments") std::complex<double>* grid_vals {
     $1 = is_array($input);
 }
 
-%typemap(in, fragment="NumPy_Macros") double* grid_vals {
-    $1 = (double *)array_data($input);
+%typemap(in, fragment="NumPy_Macros") std::complex<double>* grid_vals {
+    $1 = (std::complex<double> *)array_data($input);
 }
 
 // typemap for solve_cw:
@@ -1496,6 +1494,7 @@ void _get_gradient(PyObject *grad, double scalegrad, PyObject *fields_a, PyObjec
 // it gets garbage collected and the file gets closed.
 %newobject meep::fields::open_h5file;
 
+%newobject meep::make_output_directory;
 %newobject _get_eigenmode;
 
 %rename(_vec) meep::vec::vec;
@@ -1997,7 +1996,7 @@ meep_geom::geom_epsilon* _set_materials(meep::structure * s,
                     meep_geom::geom_epsilon *existing_geps,
                     bool output_chunk_costs,
                     const meep::binary_partition *my_bp) {
-    
+
     meep_geom::geom_epsilon *geps;
     if (existing_geps) {
         geps = existing_geps;
@@ -2049,7 +2048,8 @@ void _get_epsilon_grid(geometric_object_list gobj_list,
                        int nx, double *xtics,
                        int ny, double *ytics,
                        int nz, double *ztics,
-                       double *grid_vals) {
+                       std::complex<double> *grid_vals,
+                       double frequency) {
      meep_geom::get_epsilon_grid(gobj_list,
                                  mlist,
                                  _default_material,
@@ -2060,7 +2060,8 @@ void _get_epsilon_grid(geometric_object_list gobj_list,
                                  nx, xtics,
                                  ny, ytics,
                                  nz, ztics,
-                                 grid_vals);
+                                 grid_vals,
+                                 frequency);
 }
 
 %}
