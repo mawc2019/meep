@@ -177,6 +177,7 @@ def gather_design_region_fields(
     for monitor in design_region_monitors:
         fields_by_component = []
         for component in _compute_components(simulation):
+            print("component = ",component)
             fields_by_freq = []
             for freq_idx, _ in enumerate(frequencies):
                 fields = simulation.get_dft_array(monitor, component, freq_idx)

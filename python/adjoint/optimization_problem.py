@@ -28,6 +28,7 @@ class OptimizationProblem(object):
         fcen=None,
         df=None,
         nf=None,
+        monitor_components = None,
         decay_by=1e-11,
         decimation_factor=0,
         minimum_run_time=0,
@@ -98,7 +99,7 @@ class OptimizationProblem(object):
         #    FWD  - The optimizer has already run a forward simulation
         #    ADJ  - The optimizer has already run an adjoint simulation (but not yet calculated the gradient)
         self.current_state = "INIT"
-
+        self.monitor_components = monitor_components
         self.gradient = []
 
     def __call__(self, rho_vector=None, need_value=True, need_gradient=True, beta=None):
@@ -174,12 +175,25 @@ class OptimizationProblem(object):
         # set up monitors
         self.prepare_forward_run()
 
+        #self.forward_dft_obj = self.sim.add_dft_fields(monitor_components,self.frequencies,where=self.design_regions[0],yee_grid=False)
+        
+        if self.monitor_components != None:
+            self.forward_dft_obj = self.sim.add_dft_fields(
+                self.monitor_components,self.frequencies,
+                center=self.design_regions[0].center,size=self.design_regions[0].size,yee_grid=False)
+
         # Forward run
         self.sim.run(until_after_sources=mp.stop_when_dft_decayed(
             self.decay_by,
             self.minimum_run_time,
             self.maximum_run_time
         ))
+        
+        if self.monitor_components != None:
+            self.forward_dft = []
+            for component in self.monitor_components:
+                self.forward_dft.append(self.sim.get_dft_array(self.forward_dft_obj,component,0))
+            self.forward_dft = np.squeeze(np.array(self.forward_dft))
 
         # record objective quantities from user specified monitors
         self.results_list = []
@@ -196,6 +210,10 @@ class OptimizationProblem(object):
 
         # update solver's current state
         self.current_state = "FWD"
+        #aa = [dri for dri in enumerate(self.design_regions)]
+        #print("aa = ",aa)
+        #print("self.design_regions len = ",len(self.design_regions))
+        #self.D_f = [utils.gather_design_region_fields(self.sim,self.forward_design_region_monitors[dri],self.frequencies) for dri in range(len(self.design_regions))]
 
     def prepare_adjoint_run(self):
         # Compute adjoint sources
@@ -236,6 +254,11 @@ class OptimizationProblem(object):
             self.sim, self.design_regions, self.frequencies, self.decimation_factor
             ))
             self.sim._evaluate_dft_objects()
+            
+            if self.monitor_components != None:
+                self.adjoint_dft_obj = self.sim.add_dft_fields(
+                    self.monitor_components,self.frequencies,
+                    center=self.design_regions[0].center,size=self.design_regions[0].size,yee_grid=False)
 
             # Adjoint run
             self.sim.run(until_after_sources=mp.stop_when_dft_decayed(
@@ -243,6 +266,12 @@ class OptimizationProblem(object):
                 self.minimum_run_time,
                 self.maximum_run_time
             ))
+            
+            if self.monitor_components != None:
+                self.adjoint_dft = []
+                for component in self.monitor_components:
+                    self.adjoint_dft.append(self.sim.get_dft_array(self.adjoint_dft_obj,component,0))
+                self.adjoint_dft = np.squeeze(np.array(self.adjoint_dft))
 
         # reset the m number
         if utils._check_if_cylindrical(self.sim):
@@ -253,7 +282,26 @@ class OptimizationProblem(object):
 
         # update optimizer's state
         self.current_state = "ADJ"
+        
+        self.D_a = [[utils.gather_design_region_fields(self.sim,self.adjoint_design_region_monitors[ar][dri],self.frequencies) for dri in range(len(self.design_regions))] for ar in range(len(self.objective_functions))]
 
+    def get_forward_field(self):
+        #print("forward field is: ",self.forward_design_region_monitors[0][0].swigobj)
+        #ff = utils.gather_design_region_fields(self.sim,self.forward_design_region_monitors[0][0].swigobj,self.frequencies)
+        #print("self.forward_dft = ",self.forward_dft)
+        #print("forward field is: ",self.D_f)#ff)
+        #print("forward field shape is: ",np.array(self.D_f).shape)
+        if self.monitor_components == None: raise ValueError('The field components to be monitored is none!')
+        return self.forward_dft #self.D_f #np.squeeze(np.array(self.D_f)) #ff #self.forward_design_region_monitors[0][0]
+    
+    def get_adjoint_field(self):
+        #print("adjoint field is: ",self.D_a)
+        if self.monitor_components == None: raise ValueError('The field components to be monitored is none!')
+        return self.adjoint_dft #self.adjoint_design_region_monitors[0][0]
+    
+    def get_adjoint_source(self):
+        return self.adjoint_sources[0]
+    
     def calculate_gradient(self):
         # Iterate through all design regions and calculate gradient
         self.gradient = [[
